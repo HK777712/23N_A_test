@@ -44,30 +44,17 @@ void get_angles();
 
 void fan_control();
 
-int Ry;
-int Rx;
-int Ra; //アングル
-int Ly;
-int Lx;
-int La; //アングル
-bool L1;
-bool R1;
-bool L2;
-bool R2;
-bool ue;
-bool sita;
-bool migi;
-bool hidari;
-bool maru;
-bool sankaku;
-bool sikaku;
-bool batu;
+int Ry, Rx, Ra, Ly, Lx, La;
+
+bool L1, R1, L2, R2, ue, sita, migi, hidari, maru, sankaku, sikaku, batu;
 
 double yaw;
 
 bool corner_mode; //コーナーで90度曲がるときにtrueにする
 double corner_yaw; //コーナー前の角度を保存
 double corner_minus; //yawと↑の差
+double yaw_kizyun = 0.0; //直進する基準
+double hosei_yaw; //本当の角度から基準を引いて、直進方向を０とする
 
 double hosei = 3.0; //補正の閾値(度)
 bool hosei_mode; //角度を補正する
@@ -182,7 +169,7 @@ int main(){
         }
         if(maru && corner_mode == false){
             if(corner_mode == false){
-                corner_yaw = yaw;     //角度保存
+                corner_yaw = 0.0;     //角度保存
             }
             corner_mode = true;
             while(ps3.getButtonState(PS3::maru));
@@ -194,24 +181,26 @@ int main(){
         if(corner_mode == true){
             joy_state = "corner";
             motor(reverse,reverse,reverse,reverse);
-            corner_minus = corner_yaw - yaw;
+            corner_minus = corner_yaw - hosei_yaw;
             if(corner_minus >= 80 || (corner_minus < 0 && (corner_minus + 360) >= 80)){ //90度曲がれた時にモード切替
                 corner_mode = false;
                 joy_state = "corner_finish";
                 
                 motor(stop,stop,stop,stop);
-                bno.reset();   //90度終わった時に0度設定
-                bno.setmode(OPERATION_MODE_NDOF);
+                yaw_kizyun = yaw_kizyun - 90.0;
+                if(yaw_kizyun < 0.0){
+                    yaw_kizyun = yaw_kizyun + 360.0;
+                }
             }
         }
         
         if(batu && corner_mode == false){
             while(ps3.getButtonState(PS3::batu));
-            corner_yaw = yaw;
-            corner_minus = corner_yaw - yaw;
+            corner_yaw = 0.0;
+            corner_minus = corner_yaw - hosei_yaw;
             while((corner_minus >= 0 && corner_minus < 45) || (corner_minus < 0 && (corner_minus + 360) < 45)){
                 get_angles();
-                corner_minus = corner_yaw - yaw;
+                corner_minus = corner_yaw - hosei_yaw;
                 motor(0x20,0x20,0x20,0x20);
                 if(ps3.getButtonState(PS3::batu)){
                     motor(stop,stop,stop,stop);
@@ -222,27 +211,6 @@ int main(){
             while(ps3.getButtonState(PS3::batu));
         }
         
-        /*
-        if(corner_mode == false && sankaku){
-            joy_state = "hosei";
-            if((yaw < hosei || yaw > (360 - hosei)) && hosei_mode == false){
-                motor(forward,reverse,forward,reverse);
-            }else{
-                hosei_mode = true;
-            }
-        }
-        if(corner_mode == false && sankaku){
-            if(hosei_mode == true){
-                if(yaw > 1.0 && 180.0 > yaw){
-                    motor(low_forward,reverse,low_forward,reverse);
-                }else if(359.0 > yaw && yaw >= 180.0){
-                    motor(forward,low_reverse,forward,low_reverse);
-                }else{
-                    hosei_mode = false;
-                }
-            }
-        }
-        */
         if(sankaku){
             joy_state = "hosei";
             hosei_mode = true;
@@ -259,7 +227,7 @@ int main(){
             joy_state = "high_nohosei";
             motor(high_forward,high_reverse,high_forward,high_reverse);
         }else if(corner_mode == false && high_mode == true && hosei_mode == true){
-            if((yaw < hosei || yaw > (360 - hosei)) && high_magaru_mode == false){
+            if((hosei_yaw < hosei || hosei_yaw > (360 - hosei)) && high_magaru_mode == false){
                 motor(high_forward,high_reverse,high_forward,high_reverse);
             }else{
                 high_magaru_mode = true;
@@ -268,7 +236,7 @@ int main(){
 
 
         if(La >= 135/2 && La < 225/2 && hosei_mode == true && high_mode == false){
-            if((yaw < hosei || yaw > (360 - hosei)) && low_magaru_mode == false){
+            if((hosei_yaw < hosei || hosei_yaw > (360 - hosei)) && low_magaru_mode == false){
                 motor(forward,reverse,forward,reverse);
             }else{
                 low_magaru_mode = true;
@@ -276,18 +244,18 @@ int main(){
         }
         if(corner_mode == false && hosei_mode == true){
             if(low_magaru_mode == true){
-                if(yaw > 1.0 && 180.0 > yaw){
+                if(hosei_yaw > 1.0 && 180.0 > hosei_yaw){
                     motor(low_forward,reverse,low_forward,reverse);
-                }else if(359.0 > yaw && yaw >= 180.0){
+                }else if(359.0 > hosei_yaw && hosei_yaw >= 180.0){
                     motor(forward,low_reverse,forward,low_reverse);
                 }else{
                     low_magaru_mode = false;
                     high_magaru_mode = false;
                 }
             }else if(high_magaru_mode == true){
-                if(yaw > 1.0 && 180.0 > yaw){
+                if(hosei_yaw > 1.0 && 180.0 > hosei_yaw){
                     motor(high_low_forward,high_reverse,high_low_forward,high_reverse);
-                }else if(359.0 > yaw && yaw >= 180.0){
+                }else if(359.0 > hosei_yaw && hosei_yaw >= 180.0){
                     motor(high_forward,high_low_reverse,high_forward,high_low_reverse);
                 }else{
                     low_magaru_mode = false;
@@ -311,6 +279,7 @@ int main(){
         }
         //send(FAN,fan_speed);
         printf("yaw: %f, ",yaw);
+        printf("hoyaw: %f, ",hosei_yaw);
         /*
         for(int n = 0;n < 4;n++){
             printf("%f, ",rpm[n]);
@@ -399,74 +368,13 @@ void fan_rpm(){
     //rpm_fan = (60 * 5 * (double)fan_pulse) / (2048 * 2);
 }
 
-void PID_asi(){
-    //入力値（rpm）の範囲定義
-    PID_lf.setInputLimits(-5000,5000);
-    PID_rf.setInputLimits(-5000,5000);
-    PID_lb.setInputLimits(-5000,5000);
-    PID_rb.setInputLimits(-5000,5000);
-
-    if(rpm[0] <= LF){
-        PID_lf.setOutputLimits(0x84, 0xff);
-    }else if(rpm[0] > LF){
-        PID_lf.setOutputLimits(0x00, 0x7B);
-    }
-    if(rpm[1] <= RF){
-        PID_rf.setOutputLimits(0x84, 0xff);
-    }else if(rpm[1] > RF){
-        PID_rf.setOutputLimits(0x00, 0x7B);
-    }
-    if(rpm[2] <= LB){
-        PID_lb.setOutputLimits(0x84, 0xff);
-    }else if(rpm[2] > LB){
-        PID_lb.setOutputLimits(0x00, 0x7B);
-    }
-    if(rpm[3] <= RB){
-        PID_rb.setOutputLimits(0x84, 0xff);
-    }else if(rpm[3] > RB){
-        PID_rb.setOutputLimits(0x00, 0x7B);
-    }
-
-    PID_lf.setSetPoint(LF);//目標値設定
-    PID_rf.setSetPoint(RF);
-    PID_lb.setSetPoint(LB);
-    PID_rb.setSetPoint(RB);
-
-    PID_lf.setProcessValue(rpm[0]);//現在の値（rpm）
-    PID_rf.setProcessValue(rpm[1]);
-    PID_lb.setProcessValue(rpm[2]);
-    PID_rb.setProcessValue(rpm[3]);
-
-    PID_data[0] = PID_lf.compute();
-    PID_data[1] = PID_rf.compute();
-    PID_data[2] = PID_lb.compute();
-    PID_data[3] = PID_rb.compute();
-
-    if(rpm[0] <= LF){
-        true_motor[0] = PID_data[0];
-    }else if(rpm[0] > LF){
-        true_motor[0] = 0x7b - PID_data[0];
-    }
-    if(rpm[1] <= RF){
-        true_motor[1] = PID_data[1];
-    }else if(rpm[1] > RF){
-        true_motor[1] = 0x7b - PID_data[1];
-    }
-    if(rpm[2] <= LB){
-        true_motor[2] = PID_data[2];
-    }else if(rpm[2] > LB){
-        true_motor[2] = 0x7b - PID_data[2];
-    }
-    if(rpm[3] <= RB){
-        true_motor[3] = PID_data[3];
-    }else if(rpm[3] > RB){
-        true_motor[3] = 0x7b - PID_data[3];
-    }
-}
-
 void get_angles(){
     bno.get_angles();
     yaw = bno.euler.yaw;
+    hosei_yaw = yaw - yaw_kizyun;
+    if(hosei_yaw < 0.0){
+        hosei_yaw = hosei_yaw + 360.0;
+    }
 }
 
 void fan_control(){
