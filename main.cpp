@@ -331,10 +331,10 @@ void motor(char F1, char F2, char B1, char B2){ //足回り制御_PIDなし (LEF
     for(int n = 0;n < 4;n++){
         input_pwm[n] = input_pwm[n] - 128;
         if(input_pwm[n] > 0){//基準４
-            output_pwm[n] = round(minus_kotaiti[2] / puls_kotaiti[n] * (double)input_pwm[n]);
+            output_pwm[n] = round(minus_kotaiti[3] / puls_kotaiti[n] * (double)input_pwm[n]);
             output_pwm[n] = output_pwm[n] + 128;
         }else if(input_pwm[n] < 0){//基準２
-            output_pwm[n] = round(minus_kotaiti[2] / minus_kotaiti[n] * (double)abs(input_pwm[n]));
+            output_pwm[n] = round(minus_kotaiti[3] / minus_kotaiti[n] * (double)abs(input_pwm[n]));
             output_pwm[n] = 128 - output_pwm[n];
         }else{
             output_pwm[n] = 128;
