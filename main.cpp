@@ -166,10 +166,11 @@ int main(){
         if(sikaku){
             bno.reset();
             bno.setmode(OPERATION_MODE_NDOF);
+            yaw_kizyun = 0.0;
         }
         if(maru && corner_mode == false){
             if(corner_mode == false){
-                corner_yaw = 0.0;     //角度保存
+                corner_yaw = hosei_yaw;     //角度保存
             }
             corner_mode = true;
             while(ps3.getButtonState(PS3::maru));
@@ -181,8 +182,7 @@ int main(){
         if(corner_mode == true){
             joy_state = "corner";
             motor(reverse,reverse,reverse,reverse);
-            corner_minus = corner_yaw - hosei_yaw;
-            if(corner_minus >= 80 || (corner_minus < 0 && (corner_minus + 360) >= 80)){ //90度曲がれた時にモード切替
+            if(hosei_yaw < 280 && hosei_yaw > 220){ //90度曲がれた時にモード切替
                 corner_mode = false;
                 joy_state = "corner_finish";
                 
@@ -196,8 +196,8 @@ int main(){
         
         if(batu && corner_mode == false){
             while(ps3.getButtonState(PS3::batu));
-            corner_yaw = 0.0;
-            corner_minus = corner_yaw - hosei_yaw;
+            corner_yaw = hosei_yaw;
+            corner_minus = yaw_kizyun - hosei_yaw;
             while((corner_minus >= 0 && corner_minus < 45) || (corner_minus < 0 && (corner_minus + 360) < 45)){
                 get_angles();
                 corner_minus = corner_yaw - hosei_yaw;
