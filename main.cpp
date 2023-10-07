@@ -6,24 +6,16 @@
 #include "sstream"
 #include "iomanip"
 #include "BNO055.h"
-#include <cstdint>
 using namespace std;
-
-
-#define LEFT_FRONT 0x22
-#define RIGHT_FRONT 0x14
-#define LEFT_BACK 0x42
-#define RIGHT_BACK 0x24
-
-#define FAN 0x62
 
 RawCAN can1( PB_5,  PB_6, 1000000);
 char asimawari[8] = {0x80,0x80,0x80,0x80,0x00,0x00,0x00,0x00};
 char kubi[8] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
 char sizer[8] = {0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
-char fan_can[8] = {0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00};
+char fan_can[8] = {0x80,0x00,0x00,0x00,0x00,0x00,0x00,0x00}; //0:fan, 1:緊急停止
 
 CANMessage msg(0x010, asimawari, 8, CANData, CANStandard);
+
 
 PS3 ps3(A0,A1);
 I2C i2c(D14,D15);
@@ -41,7 +33,6 @@ PID PID_rf(5.2,  0.0,  2.5, 0.050);
 PID PID_lb(5.2,  0.0,  2.5, 0.050);
 PID PID_rb(5.2,  0.0,  2.5, 0.050);
 
-DigitalOut  sig(D13);
 DigitalIn   led(PD_2);
 void send(char add, char data);
 void getdata(void);
@@ -50,16 +41,16 @@ void motor(char F1, char F2, char B1, char B2);
 void get_rpm();
 void fan_rpm();
 
-void PID_asi();
 void get_angles();
 
 void fan_control();
-
 void can_send();
 
 int Ry, Rx, Ra, Ly, Lx, La;
 
 bool L1, R1, L2, R2, ue, sita, migi, hidari, maru, sankaku, sikaku, batu;
+
+bool maru_osi, R2_osi, batu_osi;
 
 double yaw;
 
@@ -74,16 +65,17 @@ bool hosei_mode; //角度を補正する
 bool low_magaru_mode;
 bool high_magaru_mode;
 
-bool hiena_mode;
-
 bool high_mode; //速度アップ
+bool slower_stop;
 
 Ticker flip;
 
 int input_pwm[4];
-double puls_kotaiti[4] = { 169.45, 169.4, 174.3, 162.75};//4
-double minus_kotaiti[4] = { 152.1, 141.0, 147.2, 134.75};//2
+double puls_kotaiti[4] = { 155.5, 160.8, 152.8, 160.5};//4   169.45, 169.4, 174.3, 162.75
+double minus_kotaiti[4] = { 140.5, 141.5, 149.2, 133.0};//2   152.1, 141.0, 147.2, 134.75
 int output_pwm[4];
+
+double slower_rpm[4];
 
 int LF,RF,LB,RB; //目標値
 int pulse[4]; // lf:0, rf, lb:2, rb:3
@@ -92,11 +84,6 @@ double rpm[4]; // ↑↑
 int fan_pulse;
 double rpm_fan;
 
-int kubi_tate = 0; //0~90
-int kubi_yoko = 45; //0~90　通常45
-
-char PID_data[4];
-char true_motor[4];
 
 bool fan_mode;
 bool fan_kyousei;
@@ -105,25 +92,26 @@ char fan_speed = 128;
 int main(){ 
 
 
-    sig = 0;
+    fan_can[1] = 0;
 
     char stop = 0x80;
-    char forward = 0x99; //正転
-    char reverse = 0x67; //逆転
+    char forward = 0xa7; //正転 2割99
+    char reverse = 0x59; //逆転 67
 
-    char low_forward = 0x90;
-    char low_reverse = 0x70;
+    char low_forward = 0x99; //90
+    char low_reverse = 0x67; //70
 
-    char high_forward = 0xff;
-    char high_reverse = 0x00;
+    char high_forward = 0xff; // 6割　cc
+    char high_reverse = 0x00; //34
 
-    char high_low_forward = 0xf5;
-    char high_low_reverse = 0x0b;
+    char high_low_forward = 0xf5;//ba
+    char high_low_reverse = 0x11;//46
 
     bno.reset();
     while(!bno.check());
     printf("bno start.\n");
-    bno.setmode(OPERATION_MODE_NDOF);
+    bno.setmode(OPERATION_MODE_IMUPLUS);
+
     /*
     roller_lf.reset();
     roller_rf.reset();
@@ -139,7 +127,11 @@ int main(){
         get_angles();
 
         // PIDなし
-        if(high_mode == false && corner_mode == false && hosei_mode == false){
+        if(!R2)R2_osi = false;
+        if(!batu)batu_osi = false;
+        if(!maru)maru_osi = false;
+
+        if(high_mode == false && corner_mode == false && hosei_mode == false && slower_stop == false){
             if(L1 || R1){ //回転モード
                 if(L1 && R1){
                     joy_state = "error";
@@ -182,19 +174,17 @@ int main(){
             }
         }
 
-        
-
         if(ps3.getSTARTState()){
             bno.reset();
-            bno.setmode(OPERATION_MODE_NDOF);
+            bno.setmode(OPERATION_MODE_IMUPLUS);
             yaw_kizyun = 0.0;
         }
-        if(maru && corner_mode == false){
+        if(maru && corner_mode == false && maru_osi == false){
             corner_mode = true;
-            while(ps3.getButtonState(PS3::maru));
-        }else if(maru && corner_mode == true){
+            maru_osi = true;
+        }else if(maru && corner_mode == true && maru_osi == false){
             corner_mode = false;
-            while(ps3.getButtonState(PS3::maru));
+            maru_osi = true;
         }
 
         if(corner_mode == true){
@@ -212,18 +202,20 @@ int main(){
             }
         }
         
-        if(batu && corner_mode == false){
-            while(ps3.getButtonState(PS3::batu));
-            while(hosei_yaw < 315 && hosei_yaw > 220){
-                get_angles();
-                motor(0x20,0x20,0x20,0x20);
-                if(ps3.getButtonState(PS3::batu)){
-                    motor(stop,stop,stop,stop);
-                    break;
+        if(batu && corner_mode == false && batu_osi == false){
+            batu_osi = true;
+            if(batu_osi == false){
+                while(hosei_yaw < 315 && hosei_yaw > 220){
+                    get_angles();
+                    motor(0x20,0x20,0x20,0x20);
+                    if(ps3.getButtonState(PS3::batu)){
+                        motor(stop,stop,stop,stop);
+                        break;
+                    }
                 }
+                motor(stop,stop,stop,stop);
+                batu_osi = true;
             }
-            motor(stop,stop,stop,stop);
-            while(ps3.getButtonState(PS3::batu));
         }
         
         if(sankaku){
@@ -231,19 +223,24 @@ int main(){
             hosei_mode = true;
         }else{
             hosei_mode = false;
+            low_magaru_mode = false;
+            high_magaru_mode = false;
         }
         if(ue){
             high_mode = true;
+        }else if(high_mode == true){
+            slower_stop = true;
+            slower_rpm[0] = 255;slower_rpm[1] = 0;slower_rpm[2] = 255;slower_rpm[3] = 0;
+            high_mode = false;
         }else{
             high_mode = false;
         }
 
-        if(sita && hiena_mode == false){
-            asimawari[4] = 1;
-            while(ps3.getButtonState(PS3::sita));
-        }else if(sita && hiena_mode == true){
-            asimawari[4] = 0;
-            while(ps3.getButtonState(PS3::sita));
+        if(slower_stop == true){
+            motor(round(slower_rpm[0]), round(slower_rpm[1]), round(slower_rpm[2]), round(slower_rpm[3]));
+            if(slower_rpm[0] == 128 && slower_rpm[1] == 128 && slower_rpm[2] == 128 && slower_rpm[3] == 128){
+                slower_stop = false;
+            }
         }
 
         if(corner_mode == false && high_mode == true && hosei_mode == false){
@@ -275,7 +272,7 @@ int main(){
                     low_magaru_mode = false;
                     high_magaru_mode = false;
                 }
-            }else if(high_magaru_mode == true){
+            }else if(high_magaru_mode == true && high_mode == true){
                 if(hosei_yaw > 1.0 && 180.0 > hosei_yaw){
                     motor(high_low_forward,high_reverse,high_low_forward,high_reverse);
                 }else if(359.0 > hosei_yaw && hosei_yaw >= 180.0){
@@ -287,13 +284,13 @@ int main(){
             }
         }
 
-        if(R2 && fan_mode == false){
+        if(R2 && fan_mode == false && R2_osi == false){
             fan_kyousei = false;
             fan_mode = true;
-            while(ps3.getButtonState(PS3::R2));
-        }else if(R2 && fan_mode == true){
+            R2_osi = true;
+        }else if(R2 && fan_mode == true && R2_osi == false){
             fan_mode = false;
-            while(ps3.getButtonState(PS3::R2));
+            R2_osi = true;
         }
         if(L2){
             fan_kyousei = true;
@@ -312,14 +309,13 @@ int main(){
         //printf("fan: %f ,",rpm_fan);
 
         cout << ", 足： " << joy_state << endl;
-
         can_send();
         ThisThread::sleep_for(1ms);
     } 
 } 
 
 void send(char add, char data){ //I2C 送信
-    wait_us(20);
+    wait_us(30);
     i2c.start(); 
     i2c.write(add); 
     i2c.write(data); 
@@ -416,37 +412,24 @@ void fan_control(){
     }else if(fan_kyousei == false && fan_mode == false && fan_speed < 128){
         fan_speed = fan_speed + 1;
     }
-
-
-    if(Ra < 45 && Ra > -45){
-        if(kubi_yoko <= 65 && kubi_yoko >= 25){
-            kubi_yoko = kubi_yoko + 1;
+    if(slower_stop == true){
+        slower_rpm[0] = slower_rpm[0] - 12.7;
+        slower_rpm[1] = slower_rpm[1] + 12.8;
+        slower_rpm[2] = slower_rpm[2] - 12.7;
+        slower_rpm[3] = slower_rpm[3] + 12.8;
+        if(slower_rpm[0] <= 128){
+            slower_rpm[0] = 128;
         }
-    }else if(Ra >= 45 && Ra < 135){
-        if(kubi_tate <= 90 && kubi_tate >= 0){
-            kubi_tate = kubi_tate - 3;
+        if(slower_rpm[1] >= 128){
+            slower_rpm[1] = 128;
         }
-    }else if(Ra > -135 && Ra <= -45){
-        if(kubi_tate <= 90 && kubi_tate >= 0){
-            kubi_tate = kubi_tate + 3;
+        if(slower_rpm[2] <= 128){
+            slower_rpm[2] = 128;
         }
-    }else if(Ra >= 135 || Ra <= -135){
-        if(kubi_yoko <= 65 && kubi_yoko >= 25){
-            kubi_yoko = kubi_yoko - 1;
+        if(slower_rpm[3] >= 128){
+            slower_rpm[3] = 128;
         }
     }
-    kubi[0] = kubi_tate;
-    kubi[1] = kubi_yoko;
-
-
-    if(hidari){
-        sizer[0] = 1;
-    }else if(migi){
-        sizer[0] = 0;
-    }else{
-        sizer[0] = 2;
-    }
-    
 }
 
 void can_send(){
