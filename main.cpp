@@ -39,7 +39,6 @@ void motor(char F1, char F2, char B1, char B2);
 void get_rpm();
 void fan_rpm();
 
-void PID_asi();
 void get_angles();
 
 void fan_control();
@@ -47,6 +46,8 @@ void fan_control();
 int Ry, Rx, Ra, Ly, Lx, La;
 
 bool L1, R1, L2, R2, ue, sita, migi, hidari, maru, sankaku, sikaku, batu;
+
+bool maru_osi, R2_osi, batu_osi;
 
 double yaw;
 
@@ -67,8 +68,8 @@ bool slower_stop;
 Ticker flip;
 
 int input_pwm[4];
-double puls_kotaiti[4] = { 169.45, 169.4, 174.3, 162.75};//4
-double minus_kotaiti[4] = { 152.1, 141.0, 147.2, 134.75};//2
+double puls_kotaiti[4] = { 155.5, 160.8, 152.8, 160.5};//4   169.45, 169.4, 174.3, 162.75
+double minus_kotaiti[4] = { 140.5, 141.5, 149.2, 133.0};//2   152.1, 141.0, 147.2, 134.75
 int output_pwm[4];
 
 double slower_rpm[4];
@@ -80,8 +81,6 @@ double rpm[4]; // ↑↑
 int fan_pulse;
 double rpm_fan;
 
-char PID_data[4];
-char true_motor[4];
 
 bool fan_mode;
 bool fan_kyousei;
@@ -108,7 +107,7 @@ int main(){
     bno.reset();
     while(!bno.check());
     printf("bno start.\n");
-    bno.setmode(OPERATION_MODE_NDOF);
+    bno.setmode(OPERATION_MODE_IMUPLUS);
 
     roller_lf.reset();
     roller_rf.reset();
@@ -123,6 +122,10 @@ int main(){
         get_angles();
 
         // PIDなし
+        if(!R2)R2_osi = false;
+        if(!batu)batu_osi = false;
+        if(!maru)maru_osi = false;
+
         if(high_mode == false && corner_mode == false && hosei_mode == false && slower_stop == false){
             if(L1 || R1){ //回転モード
                 if(L1 && R1){
@@ -168,18 +171,15 @@ int main(){
 
         if(sikaku){
             bno.reset();
-            bno.setmode(OPERATION_MODE_NDOF);
+            bno.setmode(OPERATION_MODE_IMUPLUS);
             yaw_kizyun = 0.0;
         }
-        if(maru && corner_mode == false){
-            if(corner_mode == false){
-                corner_yaw = hosei_yaw;     //角度保存
-            }
+        if(maru && corner_mode == false && maru_osi == false){
             corner_mode = true;
-            while(ps3.getButtonState(PS3::maru));
-        }else if(maru && corner_mode == true){
+            maru_osi = true;
+        }else if(maru && corner_mode == true && maru_osi == false){
             corner_mode = false;
-            while(ps3.getButtonState(PS3::maru));
+            maru_osi = true;
         }
 
         if(corner_mode == true){
@@ -197,13 +197,10 @@ int main(){
             }
         }
         
-        if(batu && corner_mode == false){
+        if(batu && corner_mode == false && batu_osi == false){
             while(ps3.getButtonState(PS3::batu));
-            corner_yaw = hosei_yaw;
-            corner_minus = yaw_kizyun - hosei_yaw;
-            while((corner_minus >= 0 && corner_minus < 45) || (corner_minus < 0 && (corner_minus + 360) < 45)){
+            while(hosei_yaw < 315 && hosei_yaw > 220){
                 get_angles();
-                corner_minus = corner_yaw - hosei_yaw;
                 motor(0x20,0x20,0x20,0x20);
                 if(ps3.getButtonState(PS3::batu)){
                     motor(stop,stop,stop,stop);
@@ -211,7 +208,7 @@ int main(){
                 }
             }
             motor(stop,stop,stop,stop);
-            while(ps3.getButtonState(PS3::batu));
+            batu_osi = true;
         }
         
         if(sankaku){
@@ -280,13 +277,13 @@ int main(){
             }
         }
 
-        if(R2 && fan_mode == false){
+        if(R2 && fan_mode == false && R2_osi == false){
             fan_kyousei = false;
             fan_mode = true;
-            while(ps3.getButtonState(PS3::R2));
-        }else if(R2 && fan_mode == true){
+            R2_osi = true;
+        }else if(R2 && fan_mode == true && R2_osi == false){
             fan_mode = false;
-            while(ps3.getButtonState(PS3::R2));
+            R2_osi = true;
         }
         if(L2){
             fan_kyousei = true;
