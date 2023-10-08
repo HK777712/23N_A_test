@@ -6,6 +6,7 @@
 #include "sstream"
 #include "iomanip"
 #include "BNO055.h"
+#include <cmath>
 using namespace std;
 
 
@@ -93,16 +94,16 @@ int main(){
 
     char stop = 0x80;
     char forward = 0xa7; //正転 2割99
-    char reverse = 0x59; //逆転 67
+    char reverse = 0x80 - (forward - 0x80); //逆転 67
 
-    char low_forward = 0x99; //90
-    char low_reverse = 0x67; //70
+    char low_forward = round((forward - 0x80) / 64 * 100 + 0x80); //90
+    char low_reverse = round(0x80 - (0x80 - reverse) / 64 * 100); //70
 
     char high_forward = 0xff; // 6割　cc
-    char high_reverse = 0x00; //34
+    char high_reverse = 0x80 - (high_forward - 0x80); //34
 
-    char high_low_forward = 0xf5;//ba
-    char high_low_reverse = 0x11;//46
+    char high_low_forward = round((high_forward - 0x80) / 64 * 100 + 0x80);//ba
+    char high_low_reverse = round(0x80 - (0x80 - high_reverse) / 64 * 100);//46
 
     bno.reset();
     while(!bno.check());
@@ -397,10 +398,10 @@ void fan_control(){
         fan_speed = fan_speed + 1;
     }
     if(slower_stop == true){
-        slower_rpm[0] = slower_rpm[0] - 12.7;
-        slower_rpm[1] = slower_rpm[1] + 12.8;
-        slower_rpm[2] = slower_rpm[2] - 12.7;
-        slower_rpm[3] = slower_rpm[3] + 12.8;
+        slower_rpm[0] = slower_rpm[0] - 18.143;
+        slower_rpm[1] = slower_rpm[1] + 18.286;
+        slower_rpm[2] = slower_rpm[2] - 18.143;
+        slower_rpm[3] = slower_rpm[3] + 18.286;
         if(slower_rpm[0] <= 128){
             slower_rpm[0] = 128;
         }
