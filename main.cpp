@@ -17,6 +17,18 @@ using namespace std;
 
 #define FAN 0x40
 
+RawCAN      can(PA_11, PA_12, 1000000);
+// AnalogIn    poten(A0);
+DigitalOut  led1(LED1);
+//PS3         ps3(A0, A1);
+PID Lscissor(15.0, 5.0, 0, 0.05);
+PID Rscissor(15.0, 5.0, 0, 0.05);
+CircularBuffer<CANMessage, 32> queue;
+char RcvData[8] = {0x00};
+
+
+
+
 PS3 ps3(A0,A1);
 I2C i2c(D14,D15);
 BNO055 bno(D14, D15);
@@ -87,6 +99,72 @@ bool fan_mode;
 bool fan_kyousei;
 char fan_speed = 128;
 
+//robomas
+void scissorChangeData();
+
+int motor_torqu[2] = {0};
+
+struct C610Data{
+    unsigned ID;
+    int32_t counts;
+    int32_t rpm;
+    int32_t current;
+    int32_t targetRPM;
+    int32_t averageRPM;
+    int16_t torqu;
+};
+
+struct C610Data M1;
+struct C610Data M2;
+
+void canListen(){
+    CANMessage Rcvmsg;
+    if (can.read(Rcvmsg)){
+        queue.push(Rcvmsg);
+    }
+}
+
+void datachange(unsigned ID, struct C610Data *C610, CANMessage *msg){
+    if(ID == msg->id){
+        C610->counts = uint16_t((msg->data[0] << 8) | msg->data[1]);
+        C610->rpm = int16_t((msg->data[2] << 8) | msg->data[3]);
+        C610->current = int16_t((msg->data[4] << 8) | msg->data[5]);
+        // printf("%d %d %d\n",C610->counts, C610->rpm, C610->current);
+    }
+}
+
+void TorqueToBytes(uint16_t torqu, unsigned char *upper, unsigned char *lower){
+    *upper = (torqu >> 8) & 0xFF;
+    *lower = torqu & 0XFF;
+}
+
+void sendData(const int32_t torqu0, const int32_t torqu1){
+    int16_t t0,t1;
+    if(torqu0>32000){
+        t0 = 32000;
+    }else if(torqu0<-32000){
+        t0 = -32000;
+    }else{
+        t0 = torqu0;
+    }
+    if(torqu1>32000){
+        t1 = 32000;
+    }else if(torqu1<-32000){
+        t1 = -32000;
+    }else{
+        t1 = torqu1;
+    }
+
+    CANMessage msg;
+    msg.id = 0x200;
+    TorqueToBytes(t0, &msg.data[0], &msg.data[1]);
+    TorqueToBytes(t1, &msg.data[2], &msg.data[3]);
+    for(int i=4; i<8; i++){
+        msg.data[i] = 0x00;
+    }
+    can.write(msg);
+}
+
 int main(){ 
 
 
@@ -105,6 +183,23 @@ int main(){
     char high_low_forward = round((high_forward - 0x80) / 64 * 100 + 0x80);//ba
     char high_low_reverse = round(0x80 - (0x80 - high_reverse) / 64 * 100);//46
 
+    //robomas
+    can.attach(&canListen, CAN::RxIrq);
+
+    flip.attach(&scissorChangeData,50ms);
+
+    float adc_val = 0.0;
+    int16_t TargetRotorPosition[2] = {0};
+    bool scissorMove = 0;
+
+    M1.ID = 0x201;
+    M2.ID = 0x202;
+
+    uint32_t counter=0;
+
+    CANMessage Rxmsg;
+
+
     bno.reset();
     while(!bno.check());
     printf("bno start.\n");
@@ -119,6 +214,14 @@ int main(){
     flip.attach(&fan_control,200ms);
     while (true) {
         string joy_state;
+
+        while(!queue.empty()){
+            queue.pop(Rxmsg);
+            led1 = !led1;
+            datachange(M1.ID, &M1, &Rxmsg);
+            datachange(M2.ID, &M2, &Rxmsg);
+        }
+
         getdata();
         get_angles();
 
@@ -126,6 +229,25 @@ int main(){
         if(!R2)R2_osi = false;
         if(!batu)batu_osi = false;
         if(!maru)maru_osi = false;
+
+        
+        if(hidari){
+            // M1.targetRPM = 100;
+            // M2.targetRPM = -100;
+            sendData(10000, -10000);
+            Lscissor.reset_accError();
+            Rscissor.reset_accError();
+        }else if(migi){
+            // M1.targetRPM = -100;
+            // M2.targetRPM = 100;
+            sendData(500, -500);
+            Lscissor.reset_accError();
+            Rscissor.reset_accError();
+        }else{
+            M1.targetRPM = 0;
+            M2.targetRPM = 0;
+            sendData(M1.torqu, M2.torqu);
+        }
 
         if(high_mode == false && corner_mode == false && hosei_mode == false && slower_stop == false){
             if(L1 || R1){ //回転モード
@@ -302,7 +424,7 @@ int main(){
         //printf("fan: %f ,",rpm_fan);
 
         cout << ", 足： " << joy_state << endl;
-        ThisThread::sleep_for(10ms);
+        ThisThread::sleep_for(1ms);
     } 
 } 
 
@@ -415,4 +537,58 @@ void fan_control(){
             slower_rpm[3] = 128;
         }
     }
+}
+
+
+
+
+int Lscissor_PID(C610Data *M){
+    Lscissor.setInputLimits(-18000, 18000);
+
+    if(M->rpm <= M->targetRPM){
+        Lscissor.setOutputLimits(0, 10000);
+    }else{
+        Lscissor.setOutputLimits(-10000, 0);
+    }
+
+    M->averageRPM = M->averageRPM * (6.0/7.0) + M->rpm/7.0;
+
+    Lscissor.setSetPoint(M->targetRPM);
+    Lscissor.setProcessValue(M->rpm);
+
+    if(M->rpm <= M->targetRPM){
+        M->torqu = Lscissor.compute();
+    }else{
+        M->torqu = -10000 - Lscissor.compute();
+    }
+        
+    return 0;
+}
+
+int Rscissor_PID(C610Data *M){
+    Rscissor.setInputLimits(-18000, 18000);
+
+    if(M->rpm <= M->targetRPM){
+        Rscissor.setOutputLimits(0, 10000);
+    }else{
+        Rscissor.setOutputLimits(-10000, 0);
+    }
+
+    M->averageRPM = M->averageRPM * (6.0/7.0) + M->rpm/7.0;
+
+    Rscissor.setSetPoint(M->targetRPM);
+    Rscissor.setProcessValue(M->rpm);
+
+    if(M->rpm <= M->targetRPM){
+        M->torqu = Rscissor.compute();
+    }else{
+        M->torqu = -10000 - Rscissor.compute();
+    }
+
+    return 0;
+}
+
+void scissorChangeData(){
+    Lscissor_PID(&M1);
+    Rscissor_PID(&M2);
 }
