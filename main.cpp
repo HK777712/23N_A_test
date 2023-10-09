@@ -17,9 +17,9 @@ using namespace std;
 
 #define FAN 0x40
 
-RawCAN      can(PA_11, PA_12, 1000000);
+RawCAN      can(PB_5, PB_6, 1000000);
 // AnalogIn    poten(A0);
-DigitalOut  led1(LED1);
+// DigitalOut  led1(LED1);
 //PS3         ps3(A0, A1);
 PID Lscissor(15.0, 5.0, 0, 0.05);
 PID Rscissor(15.0, 5.0, 0, 0.05);
@@ -32,10 +32,12 @@ char RcvData[8] = {0x00};
 PS3 ps3(A0,A1);
 I2C i2c(D14,D15);
 BNO055 bno(D14, D15);
+/*
 QEI roller_lf(D5,D6,NC,2048,QEI::X2_ENCODING); //b,a
 QEI roller_rf(D9,D10,NC,2048,QEI::X2_ENCODING);
 QEI roller_lb(D3,D4,NC,2048,QEI::X2_ENCODING);
 QEI roller_rb(D7,D8,NC,2048,QEI::X2_ENCODING);
+*/
 //QEI fan(D11,D12,NC,2048,QEI::X2_ENCODING);
 
 PID PID_lf(5.2,  0.0,  2.5, 0.050);
@@ -44,7 +46,6 @@ PID PID_lb(5.2,  0.0,  2.5, 0.050);
 PID PID_rb(5.2,  0.0,  2.5, 0.050);
 
 DigitalOut  sig(D13);
-DigitalIn   led(PD_2);
 void send(char add, char data);
 void getdata(void);
 //void motor(int F1, int F2, int B1, int B2); //0:stop, 1:forward, 2:reverse
@@ -166,8 +167,6 @@ void sendData(const int32_t torqu0, const int32_t torqu1){
 }
 
 int main(){ 
-
-
     sig = 0;
 
     char stop = 0x80;
@@ -205,10 +204,12 @@ int main(){
     printf("bno start.\n");
     bno.setmode(OPERATION_MODE_IMUPLUS);
 
+    /*
     roller_lf.reset();
     roller_rf.reset();
     roller_lb.reset();
     roller_rb.reset();
+    */
     //fan.reset();
 
     flip.attach(&fan_control,200ms);
@@ -217,13 +218,16 @@ int main(){
 
         while(!queue.empty()){
             queue.pop(Rxmsg);
-            led1 = !led1;
+            // led1 = !led1;
             datachange(M1.ID, &M1, &Rxmsg);
             datachange(M2.ID, &M2, &Rxmsg);
         }
 
         getdata();
         get_angles();
+
+        // debag
+        printf("M1:%d %d %d %d  M2: %d %d %d %d \n",M1.torqu, M1.rpm, M1.counts, M1.current, M2.torqu, M2.rpm, M2.counts, M2.current);
 
         // PIDなし
         if(!R2)R2_osi = false;
@@ -234,13 +238,13 @@ int main(){
         if(hidari){
             // M1.targetRPM = 100;
             // M2.targetRPM = -100;
-            sendData(10000, -10000);
+            sendData(-10000, 10000);
             Lscissor.reset_accError();
             Rscissor.reset_accError();
         }else if(migi){
             // M1.targetRPM = -100;
             // M2.targetRPM = 100;
-            sendData(500, -500);
+            sendData(-500, 500);
             Lscissor.reset_accError();
             Rscissor.reset_accError();
         }else{
@@ -484,6 +488,7 @@ void motor(char F1, char F2, char B1, char B2){ //足回り制御_PIDなし (LEF
 
 
 void get_rpm(){
+    /*
     pulse[0] = roller_lf.getPulses();
     pulse[1] = roller_rf.getPulses();
     pulse[2] = roller_lb.getPulses();
@@ -492,6 +497,7 @@ void get_rpm(){
     roller_rf.reset();
     roller_lb.reset();
     roller_rb.reset();
+    */
     for(int i = 0;i < 4;i++){
         rpm[i] = (60 * 5 * (double)pulse[i]) / (2048 * 2);
     }
@@ -520,10 +526,10 @@ void fan_control(){
         fan_speed = fan_speed + 1;
     }
     if(slower_stop == true){
-        slower_rpm[0] = slower_rpm[0] - 18.143;
-        slower_rpm[1] = slower_rpm[1] + 18.286;
-        slower_rpm[2] = slower_rpm[2] - 18.143;
-        slower_rpm[3] = slower_rpm[3] + 18.286;
+        slower_rpm[0] = slower_rpm[0] - 15.875;
+        slower_rpm[1] = slower_rpm[1] + 16.0;
+        slower_rpm[2] = slower_rpm[2] - 15.875;
+        slower_rpm[3] = slower_rpm[3] + 16.0;
         if(slower_rpm[0] <= 128){
             slower_rpm[0] = 128;
         }
